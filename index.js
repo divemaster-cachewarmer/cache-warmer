@@ -6,7 +6,7 @@ import * as dotenv from "dotenv";
 dotenv.config();
 
 /* ====== ENV WAJIB ====== */
-const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL; // URL Web App GAS /exec
+const APPS_SCRIPT_URL = process.env.APPS_SCRIPT_URL;
 
 /* ====== KONFIG DOMAIN/PROXY/UA ====== */
 const DOMAINS_MAP = {
@@ -14,7 +14,7 @@ const DOMAINS_MAP = {
 };
 
 const PROXIES = {
-  id: process.env.BRD_PROXY_ID, // boleh kosong (tanpa proxy)
+  id: process.env.BRD_PROXY_ID,
 };
 
 const USER_AGENTS = {
@@ -30,10 +30,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const cryptoRandomId = () =>
   Math.random().toString(36).slice(2) + Date.now().toString(36);
 
-/** Nama tab per-run: YYYY-MM-DD_HH-mm-ss_WITA (tanpa +0800) */
 function makeSheetNameForRun(date = new Date()) {
   const pad = (n) => String(n).padStart(2, "0");
-  const local = new Date(date.getTime() + 8 * 3600 * 1000); // WITA +08
+  const local = new Date(date.getTime() + 8 * 3600 * 1000);
   return `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(
     local.getUTCDate()
   )}_${pad(local.getUTCHours())}-${pad(local.getUTCMinutes())}-${pad(
@@ -41,14 +40,14 @@ function makeSheetNameForRun(date = new Date()) {
   )}_WITA`;
 }
 
-/* ====== LOGGER → APPS SCRIPT (BATCH PER-RUN) ====== */
+/* ====== LOGGER ====== */
 class AppsScriptLogger {
   constructor() {
     this.rows = [];
     this.runId = cryptoRandomId();
     this.startedAt = new Date().toISOString();
     this.finishedAt = null;
-    this.sheetName = makeSheetNameForRun(); // satu tab per-run
+    this.sheetName = makeSheetNameForRun();
   }
 
   log({
@@ -63,18 +62,18 @@ class AppsScriptLogger {
     message = "",
   }) {
     this.rows.push([
-      this.runId, // run_id
-      this.startedAt, // started_at (ISO)
-      this.finishedAt, // finished_at (diisi saat finalize)
-      country, // country
-      url, // url
-      status, // status code
-      cfCache, // cf_cache
-      lsCache, // vercel_cache (dipakai utk LiteSpeed)
-      cfRay, // cf_ray
-      typeof responseMs === "number" ? responseMs : "", // response_ms
-      error ? 1 : 0, // error (0/1)
-      message, // message
+      this.runId,
+      this.startedAt,
+      this.finishedAt,
+      country,
+      url,
+      status,
+      cfCache,
+      lsCache,
+      cfRay,
+      typeof responseMs === "number" ? responseMs : "",
+      error ? 1 : 0,
+      message,
     ]);
   }
 
@@ -84,32 +83,23 @@ class AppsScriptLogger {
   }
 
   async flush() {
-    if (!APPS_SCRIPT_URL) {
-      console.warn("Apps Script logging disabled (missing APPS_SCRIPT_URL).");
-      return;
-    }
-    if (this.rows.length === 0) return;
-
+    if (!APPS_SCRIPT_URL || this.rows.length === 0) return;
     try {
-      const res = await axios.post(
+      await axios.post(
         APPS_SCRIPT_URL,
         { sheetName: this.sheetName, rows: this.rows },
         { timeout: 20000, headers: { "Content-Type": "application/json" } }
       );
-      console.log("Apps Script response:", res.status, res.data);
-      if (!res.data?.ok) console.warn("Apps Script replied error:", res.data);
-      this.rows = []; // bersihkan buffer
     } catch (e) {
       console.warn(
         "Apps Script logging error:",
-        e?.response?.status,
         e?.response?.data || e?.message || e
       );
     }
   }
 }
 
-/* ====== HTTP helper (dgn/tnp proxy) ====== */
+/* ====== HTTP ====== */
 function buildAxiosCfg(country, extra = {}) {
   const proxy = PROXIES[country];
   const cfg = {
@@ -130,50 +120,39 @@ async function fetchWithProxy(url, country, timeout = 15000) {
 
 async function fetchIndexSitemaps(domain, country) {
   try {
-    // WordPress Yoast umumnya: /sitemap_index.xml
-    const xml = await fetchWithProxy(
-      `${domain}/sitemap_index.xml`,
-      country,
-      15000
-    );
+    const xml = await fetchWithProxy(`${domain}/sitemap_index.xml`, country);
     const result = await parseStringPromise(xml, {
       explicitArray: false,
       ignoreAttrs: true,
     });
-    const sitemapList = result?.sitemapindex?.sitemap;
-    if (!sitemapList) return [];
-    const sitemaps = Array.isArray(sitemapList) ? sitemapList : [sitemapList];
-    return sitemaps.map((entry) => entry.loc).filter(Boolean);
-  } catch (err) {
-    console.warn(
-      `[${country}] ❌ Failed to fetch sitemap index: ${err?.message || err}`
-    );
+    const list = result?.sitemapindex?.sitemap;
+    if (!list) return [];
+    return (Array.isArray(list) ? list : [list])
+      .map((e) => e.loc)
+      .filter(Boolean);
+  } catch {
     return [];
   }
 }
 
 async function fetchUrlsFromSitemap(sitemapUrl, country) {
   try {
-    const xml = await fetchWithProxy(sitemapUrl, country, 15000);
+    const xml = await fetchWithProxy(sitemapUrl, country);
     const result = await parseStringPromise(xml, {
       explicitArray: false,
       ignoreAttrs: true,
     });
-    const urlList = result?.urlset?.url;
-    if (!urlList) return [];
-    const urls = Array.isArray(urlList) ? urlList : [urlList];
-    return urls.map((entry) => entry.loc).filter(Boolean);
-  } catch (err) {
-    console.warn(
-      `[${country}] ❌ Failed to fetch URLs from ${sitemapUrl}: ${
-        err?.message || err
-      }`
-    );
+    const list = result?.urlset?.url;
+    if (!list) return [];
+    return (Array.isArray(list) ? list : [list])
+      .map((e) => e.loc)
+      .filter(Boolean);
+  } catch {
     return [];
   }
 }
 
-/* ====== WARMING ====== */
+/* ====== REQUEST ====== */
 async function retryableGet(url, cfg, retries = 3) {
   let lastError = null;
   for (let i = 0; i < retries; i++) {
@@ -182,10 +161,14 @@ async function retryableGet(url, cfg, retries = 3) {
     } catch (err) {
       lastError = err;
       const code = err?.code || "";
-      const retryable =
-        axios.isAxiosError(err) &&
-        ["ECONNABORTED", "ECONNRESET", "ETIMEDOUT"].includes(code);
-      if (!retryable) break;
+      if (
+        !(
+          axios.isAxiosError(err) &&
+          ["ECONNABORTED", "ECONNRESET", "ETIMEDOUT"].includes(code)
+        )
+      ) {
+        break;
+      }
       await sleep(2000);
     }
   }
@@ -205,9 +188,7 @@ async function purgeCloudflareCache(url) {
         },
       }
     );
-    if (purgeRes.data?.success) {
-      console.log(`✅ Cloudflare cache purged: ${url}`);
-    } else {
+    if (!purgeRes.data?.success) {
       console.warn(`⚠️ Failed to purge Cloudflare: ${url}`);
     }
   } catch {
@@ -215,6 +196,7 @@ async function purgeCloudflareCache(url) {
   }
 }
 
+/* ====== WARMING ====== */
 async function warmUrls(urls, country, logger, batchSize = 1, delay = 2000) {
   const batches = Array.from(
     { length: Math.ceil(urls.length / batchSize) },
@@ -242,29 +224,30 @@ async function warmUrls(urls, country, logger, batchSize = 1, delay = 2000) {
             `[${country}] ${res.status} cf=${cfCache} ls=${lsCache} edge=${cfEdge} - ${url}`
           );
 
-          // Kumpulkan log (TIDAK dikirim sekarang; dikirim sekali di akhir run)
+          // ✅ country = CF EDGE (HANYA DI SINI)
           logger.log({
-            country,
+            country: cfEdge,
             url,
             status: res.status,
             cfCache,
-            lsCache, // disimpan di kolom 'vercel_cache' (header lama)
+            lsCache,
             cfRay,
             responseMs: dt,
             error: 0,
             message: "",
           });
 
-          // Aturan purge: kalau LiteSpeed bukan HIT → purge CF
           if (String(lsCache).toLowerCase() !== "hit") {
             await purgeCloudflareCache(url);
           }
         } catch (err) {
-          const dt = Date.now() - t0;
+          const dt = Date.now() - t0; // ✅ FIX dt
+
           console.warn(
             `[${country}] ❌ Failed to warm ${url}: ${err?.message || err}`
           );
 
+          // ❌ country TIDAK DIUBAH
           logger.log({
             country,
             url,
@@ -276,12 +259,11 @@ async function warmUrls(urls, country, logger, batchSize = 1, delay = 2000) {
       })
     );
 
-    // TIDAK flush di sini → supaya semua baris terkirim SEKALI di akhir ke satu tab
     await sleep(delay);
   }
 }
 
-/* ====== MAIN (batch per-run, satu tab) ====== */
+/* ====== MAIN ====== */
 (async () => {
   console.log(`[CacheWarmer] Started: ${new Date().toISOString()}`);
   const logger = new AppsScriptLogger();
@@ -291,9 +273,7 @@ async function warmUrls(urls, country, logger, batchSize = 1, delay = 2000) {
       Object.entries(DOMAINS_MAP).map(async ([country, domain]) => {
         const sitemapList = await fetchIndexSitemaps(domain, country);
         const urlArrays = await Promise.all(
-          sitemapList.map((sitemapUrl) =>
-            fetchUrlsFromSitemap(sitemapUrl, country)
-          )
+          sitemapList.map((s) => fetchUrlsFromSitemap(s, country))
         );
         const urls = urlArrays.flat().filter(Boolean);
 
@@ -307,7 +287,6 @@ async function warmUrls(urls, country, logger, batchSize = 1, delay = 2000) {
       })
     );
   } finally {
-    // Kirim SEKALI di akhir → semua baris tersimpan dalam SATU tab (sheetName per-run)
     logger.setFinished();
     await logger.flush();
   }
